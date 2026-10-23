@@ -1,12 +1,15 @@
 /* Memory Castle prototype - vanilla JS, data stays in this browser (localStorage). */
 (function () {
   'use strict';
-  var KEY = 'memoryCastle.v1';
+  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.2';
   var app = document.getElementById('app'), back = document.getElementById('back'),
       bartitle = document.getElementById('bartitle'), toastEl = document.getElementById('toast');
 
   /* ---------- data ---------- */
-  var S = load();
+  var S = load(), NT = loadNotes();
+  function loadNotes() { try { return Notes.sane(JSON.parse(localStorage.getItem(NKEY))); } catch (e) { return Notes.empty(); } }
+  function saveNotes() { try { localStorage.setItem(NKEY, JSON.stringify(NT)); } catch (e) {} }
+  function logEvent(name, detail) { Notes.addTrail(NT, 'event', name, detail); saveNotes(); }
   function load() {
     try { var d = JSON.parse(localStorage.getItem(KEY)); if (d && d.castles) { d.prefs = d.prefs || {}; return d; } } catch (e) {}
     return { castles: [], prefs: {} };
@@ -30,20 +33,9 @@
   function toast(m) { toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2600); }
   function shuffle(a) { a = a.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
-  /* ---------- splitting text into chunks ---------- */
-  function splitText(text, mode) {
-    text = String(text || '').replace(/\r\n?/g, '\n').trim();
-    if (!text) return [];
-    var clean = function (a) { return a.map(function (s) { return s.trim(); }).filter(Boolean); };
-    var blocks = clean(text.split(/\n\s*\n/)), lines = clean(text.split('\n')),
-        sentences = clean(text.replace(/\n+/g, ' ').match(/[^.!?]+[.!?]+["')\]\u201d]*|[^.!?]+$/g) || [text]);
-    if (mode === 'blank') return blocks;
-    if (mode === 'line') return lines;
-    if (mode === 'sentence') return sentences;
-    if (blocks.length > 1) return blocks;
-    if (lines.length > 1) return lines;
-    return sentences;
-  }
+  /* ---------- splitting text into chunks (see splitter.js) ---------- */
+  var LEVEL_NAMES = Splitter.LEVELS.map(function (l) { return l.name; });
+  function proposed() { return Splitter.split(ui.pasteText, { mode: ui.mode, level: ui.level }); }
 
   var BEATITUDES = ['Poor in spirit', 'Gentle', 'Those who mourn', 'Hunger and thirst for what is right', 'Merciful', 'Pure in heart', 'Peacemakers', 'Persecuted for the cause of right'];
   var HOUSE_STOPS = ['Front gate', 'Letterbox', 'Front door', 'Hallway', 'Lounge room', 'Kitchen', 'Dining table', 'Bedroom', 'Bathroom', 'Back verandah', 'Backyard', 'Garage', 'Clothesline'];
@@ -51,13 +43,14 @@
   var NUDGES = ['Make it odd. Strange pictures stick better than sensible ones.', 'Make it big. Giants, mountains, enormous or tiny.', 'Make it move. Something crashing, dancing, pouring, climbing.', 'Make it funny. If it makes you smile, you will remember it.', 'Use your senses. What can you smell, hear, taste or feel there?', 'Put yourself in the picture. What are you doing? How do you feel?'];
 
   /* ---------- router ---------- */
-  var ui = { session: null, reveal: false, nudge: false, ideas: '', mode: 'auto' };
+  var ui = { session: null, reveal: false, nudge: false, ideas: '', mode: 'auto', level: 1, pasteText: '', ideaSeed: 0, lastKey: '' };
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function route() { var p = (location.hash || '#/home').replace(/^#\/?/, '').split('/'); return { name: p[0] || 'home', id: p[1], n: parseInt(p[2], 10) || 0 }; }
   function parentOf(r) {
     var c = castle(r.id);
     switch (r.name) {
-      case 'new': case 'backup': case 'castle': return '#/home';
+      case 'new': case 'backup': case 'castle': case 'notes': return '#/home';
+      case 'preview': return '#/new';
       case 'edit': return c && c.built ? '#/castle/' + c.id : '#/home';
       case 'stops': return c ? '#/edit/' + c.id : '#/home';
       case 'images': return c && c.built ? '#/castle/' + c.id : (c ? '#/stops/' + c.id : '#/home');
@@ -73,9 +66,11 @@
     var r = route(), c = castle(r.id), html = '', title = 'Memory Castle';
     window.scrollTo(0, 0);
     back.hidden = r.name === 'home';
-    if (r.name !== 'home' && r.name !== 'new' && r.name !== 'backup' && r.name !== 'recall' && !c) { go('#/home'); return; }
+    if (r.name !== 'home' && r.name !== 'new' && r.name !== 'backup' && r.name !== 'recall' && r.name !== 'preview' && r.name !== 'notes' && !c) { go('#/home'); return; }
     switch (r.name) {
       case 'new': title = 'New castle'; html = vNew(); break;
+      case 'preview': if (!ui.pasteText.trim()) { go('#/new'); return; } title = 'Step 1: the pieces'; html = vPreview(); break;
+      case 'notes': title = 'Session notes'; html = vNotes(); break;
       case 'backup': title = 'Back up'; html = vBackup(); break;
       case 'edit': title = 'Step 1: the text'; html = vEdit(c); break;
       case 'stops': title = 'Step 2: your route'; html = vStops(c); break;
@@ -86,7 +81,27 @@
       default: html = vHome();
     }
     bartitle.textContent = title;
-    app.innerHTML = html;
+    var sc = screenInfo(r, c);
+    if (sc.key !== ui.lastKey) { ui.lastKey = sc.key; Notes.addTrail(NT, 'screen', sc.name, sc.detail); saveNotes(); }
+    app.innerHTML = html + '<div class="confused"><button class="linkbtn" data-act="confused">\ud83e\udd14 Something confused me</button></div>';
+  }
+
+  /* name of the current screen for the notes and trail (never includes the user's own words) */
+  function screenInfo(r, c) {
+    var n = c ? c.chunks.length : 0, i = c ? Math.min(Math.max(r.n, 0), n - 1) + 1 : 0;
+    switch (r.name) {
+      case 'new': return { key: 'new', name: 'Paste text' };
+      case 'preview': return { key: 'preview', name: 'Check the proposed pieces', detail: plural(proposed().length, 'piece', 'pieces') + ', ' + (ui.mode === 'auto' ? 'automatic, ' + LEVEL_NAMES[ui.level].toLowerCase() : ui.mode) };
+      case 'edit': return { key: 'edit', name: 'Edit pieces', detail: plural(n, 'piece', 'pieces') };
+      case 'stops': return { key: 'stops', name: 'Route and stops', detail: plural(n, 'stop', 'stops') };
+      case 'images': return { key: 'images/' + i, name: 'Make images', detail: 'stop ' + i + ' of ' + n };
+      case 'castle': return { key: 'castle', name: 'Castle page', detail: c.built ? 'built' : 'not finished' };
+      case 'walk': return { key: 'walk/' + i, name: 'Walk through', detail: 'stop ' + i + ' of ' + n };
+      case 'recall': return { key: 'recall' + (ui.session && ui.session.done ? '-done' : ''), name: ui.session && ui.session.done ? 'Practice finished' : 'Practice', detail: ui.session ? ui.session.label : undefined };
+      case 'backup': return { key: 'backup', name: 'Back up or restore' };
+      case 'notes': return { key: 'notes', name: 'Session notes' };
+    }
+    return { key: 'home', name: 'Home' };
   }
 
   /* ---------- views ---------- */
@@ -109,18 +124,30 @@
     }
     h += '<button class="btn primary" data-act="goNew">+ Build a new castle</button>';
     h += '<button class="btn" data-act="goBackup">Back up or restore my castles</button>';
+    h += '<button class="btn" data-act="goNotes">Share session notes' + (NT.notes.length ? ' (' + NT.notes.length + ')' : '') + '</button>';
     if (!S.prefs.hideInstall) h += '<div class="card"><h3>Keep it on your home screen</h3><p class="small">On iPhone: tap the Share button, then \u201cAdd to Home Screen\u201d. On Android: open the browser menu and choose \u201cInstall app\u201d or \u201cAdd to Home screen\u201d.</p><button class="btn small" data-act="hideInstall">Got it</button></div>';
-    h += '<p class="soft small" style="text-align:center">Prototype \u00b7 your castles are saved only on this phone</p>';
+    h += '<p class="soft small" style="text-align:center">Prototype v' + VERSION + ' \u00b7 your castles are saved only on this phone</p>';
     return h;
   }
 
   function vNew() {
-    var modes = [['auto', 'Automatically'], ['blank', 'Blank lines'], ['line', 'Each line'], ['sentence', 'Each sentence']];
-    return '<h2>What would you like to remember?</h2><p class="soft">Paste your own copy of the text. I will break it into small pieces, and you can adjust them next.</p>' +
-      '<label for="paste">Your text</label><textarea id="paste" style="min-height:200px" placeholder="Paste or type here\u2026"></textarea>' +
-      '<label>Break it up by</label><div class="chips" id="modes">' + modes.map(function (m) { return '<button class="chip' + (ui.mode === m[0] ? ' on' : '') + '" data-act="mode" data-v="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>' +
-      '<button class="btn primary" data-act="split" style="margin-top:12px">Break it into pieces</button>' +
+    return '<h2>What would you like to remember?</h2><p class="soft">Paste your own copy of the text. Next I will show you how I would break it into small pieces, one for each stop in your castle, and you can change it.</p>' +
+      '<label for="paste">Your text</label><textarea id="paste" style="min-height:200px" placeholder="Paste or type here\u2026">' + esc(ui.pasteText) + '</textarea>' +
+      '<button class="btn primary" data-act="split" style="margin-top:12px">Show me the pieces</button>' +
       '<div class="card gold" style="margin-top:18px"><h3>Just want to look around?</h3><p class="small">Try the Beatitudes example. It starts with eight short reminder titles only. The Bible text is under copyright, so this app does not include it. You paste in your own copy.</p><button class="btn warm" data-act="example">Try the Beatitudes example</button></div>';
+  }
+
+  function vPreview() {
+    var parts = proposed(), modes = [['auto', 'Automatically'], ['blank', 'Blank lines'], ['line', 'Each line'], ['sentence', 'Each sentence']];
+    var h = '<h2>Here is how I would break it up</h2><p class="soft">I found <b>' + plural(parts.length, 'piece', 'pieces') + '</b>. Each piece gets its own stop in your castle, so small pieces are easier to picture. Not right? Change the size below, or edit the pieces on the next screen: you can join, split or reword any of them.</p>' +
+      '<label>Break it up by</label><div class="chips">' + modes.map(function (m) { return '<button class="chip' + (ui.mode === m[0] ? ' on' : '') + '" data-act="mode" data-v="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>';
+    if (ui.mode === 'auto') h += '<label>Size of each piece</label><div class="chips">' + LEVEL_NAMES.map(function (nm, i) { return '<button class="chip' + (ui.level === i ? ' on' : '') + '" data-act="level" data-v="' + i + '">' + nm + '</button>'; }).join('') + '</div>';
+    if (parts.length === 1 && Splitter.wordCount(parts[0]) > 25) h += '<div class="card gold small">This is still one big piece. Try \u201cSmaller\u201d, or pick another way to break it up.</div>';
+    parts.forEach(function (p, i) {
+      var w = Splitter.wordCount(p);
+      h += '<div class="card"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t soft small">' + plural(w, 'word', 'words') + (w > 40 ? ' \u00b7 long' : '') + '</span></div><div class="piece">' + esc(p) + '</div></div>';
+    });
+    return h + '<div style="height:70px"></div><div class="sticky"><button class="btn primary" data-act="usePieces">Use these ' + plural(parts.length, 'piece', 'pieces') + '</button></div>';
   }
 
   function vEdit(c) {
@@ -129,11 +156,13 @@
     h += '<label for="ctitle">Name of this castle</label><input type="text" id="ctitle" value="' + esc(c.title) + '" data-cfield="title">';
     c.chunks.forEach(function (k, i) {
       h += '<div class="card" style="margin-top:14px"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t soft small">Piece ' + (i + 1) + ' of ' + c.chunks.length + '</span></div>' +
+        (Splitter.wordCount(k.text) > 40 ? '<p class="small soft" style="margin:0 0 6px">This one is long (' + Splitter.wordCount(k.text) + ' words). Try \u201cBreak into smaller pieces\u201d.</p>' : '') +
         '<textarea data-field="text" data-cid="' + k.id + '" aria-label="Piece ' + (i + 1) + '">' + esc(k.text) + '</textarea><div class="ops">' +
         '<button class="btn small" data-act="up" data-cid="' + k.id + '"' + (i === 0 ? ' disabled' : '') + ' aria-label="Move up">\u2191 Up</button>' +
         '<button class="btn small" data-act="down" data-cid="' + k.id + '"' + (i === c.chunks.length - 1 ? ' disabled' : '') + ' aria-label="Move down">\u2193 Down</button>' +
         '<button class="btn small" data-act="join" data-cid="' + k.id + '"' + (i === c.chunks.length - 1 ? ' disabled' : '') + '>Join with next</button>' +
         '<button class="btn small" data-act="splitAt" data-cid="' + k.id + '">Split at cursor</button>' +
+        '<button class="btn small" data-act="smaller" data-cid="' + k.id + '">Break into smaller pieces</button>' +
         '<button class="btn small danger" data-act="remove" data-cid="' + k.id + '">Remove</button></div></div>';
     });
     h += '<button class="btn" data-act="addChunk">+ Add a piece</button><div style="height:70px"></div>' +
@@ -164,6 +193,7 @@
     var h = '<div class="progress"><i style="width:' + Math.round((i + 1) / c.chunks.length * 100) + '%"></i></div><p class="soft small">Stop ' + (i + 1) + ' of ' + c.chunks.length + '</p>' +
       '<div class="stop">' + esc(k.stop || 'Stop ' + (i + 1)) + '</div>' +
       '<div class="card"><div class="small soft">Remember this</div><div style="font-family:Georgia,serif;font-size:20px;white-space:pre-wrap">' + esc(short(k.text, 300)) + '</div></div>' +
+      ideasCard(k, i) +
       '<label for="img">Picture it at this stop. What do you see?</label>' +
       '<textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
       '<button class="btn small" data-act="nudge" style="margin-top:8px">' + (ui.nudge ? 'Hide the nudges' : 'Need a nudge?') + '</button>';
@@ -172,6 +202,13 @@
       '<button class="btn" data-act="imgPrev" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + ' style="margin:0">Back</button>' +
       '<button class="btn primary" data-act="imgNext" data-i="' + i + '" style="margin:0">' + (last ? 'Finish my castle' : 'Next stop') + '</button></div></div>';
     return h;
+  }
+
+  function ideasCard(k, i) {
+    var list = Ideas.ideas(k.stop, k.text, ui.ideaSeed);
+    return '<div class="card gold"><p style="margin-bottom:8px"><b>Not sure where to start?</b></p><p class="small" style="margin-bottom:10px">Here are three ideas in words. Tap one to use it as a starting point, then change it to make it yours. Or ignore them and write your own below. You are the artist.</p>' +
+      list.map(function (t, n) { return '<button class="idea" data-act="useIdea" data-n="' + n + '" data-text="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') +
+      '<button class="btn small" data-act="moreIdeas" style="margin:4px 0 0">Show different ideas</button></div>';
   }
 
   function vCastle(c) {
@@ -239,6 +276,48 @@
     return h + '</div>';
   }
 
+  /* ---------- session notes ---------- */
+  function notesExport() { return Notes.build(NT, { viewport: window.innerWidth + 'x' + window.innerHeight, homeScreenApp: !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)), version: VERSION }); }
+  function vNotes() {
+    var x = notesExport(), h = '<h2>Share session notes</h2>' +
+      '<div class="card"><p>When something confuses you, tap <b>\ud83e\udd14 Something confused me</b> at the bottom of any screen. It saves a short note on this phone with the time and the screen you were on.</p>' +
+      '<p>When you are ready, you can send the notes to the person improving the app.</p></div>' +
+      '<div class="card gold"><p class="small"><b>What gets shared:</b> your notes, the list of screens you used and when, and your screen size.</p><p class="small"><b>What never gets shared:</b> your text, your images, your stop and route names, or your castles.</p><p class="small" style="margin:0"><b>Nothing is sent automatically.</b> You choose whether to send the file, and to whom.</p></div>' +
+      '<h3>Your notes (' + NT.notes.length + ')</h3>';
+    if (!NT.notes.length) h += '<p class="soft small">No notes yet.</p>';
+    NT.notes.slice().reverse().forEach(function (n) { h += '<div class="card small"><div class="soft">' + esc(new Date(n.t).toLocaleString()) + ' \u00b7 ' + esc(n.screen) + '</div>' + (n.text ? esc(n.text) : '<i class="soft">(no text)</i>') + '</div>'; });
+    h += '<details class="card small"><summary>See exactly what would be shared</summary><pre>' + esc(Notes.asText(x)) + '</pre></details>' +
+      '<button class="btn primary" data-act="shareNotes">Share session notes</button>' +
+      '<button class="btn" data-act="copyNotes">Copy as text</button>' +
+      '<button class="btn danger" data-act="clearNotes">Clear all notes and trail</button>';
+    return h;
+  }
+  function notesFile() { return new File([JSON.stringify(notesExport(), null, 2)], 'memory-castle-session-notes-' + SR.today() + '.json', { type: 'application/json' }); }
+  function shareNotes() {
+    var f; try { f = notesFile(); } catch (e) { f = null; }
+    if (f && navigator.canShare && navigator.canShare({ files: [f] })) { navigator.share({ files: [f], title: 'Memory Castle session notes' }).catch(function (e) { if (e && e.name !== 'AbortError') downloadNotes(); }); return; }
+    downloadNotes();
+  }
+  function downloadNotes() {
+    var blob = new Blob([JSON.stringify(notesExport(), null, 2)], { type: 'application/json' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'memory-castle-session-notes-' + SR.today() + '.json';
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    toast('Notes file saved to your downloads. Send it on.');
+  }
+  function confusedBox() {
+    var sc = screenInfo(route(), castle(route().id)), m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div role="dialog" aria-modal="true"><h3>Something confused me</h3><p class="soft small">This saves a note on your phone with the time and screen (\u201c' + esc(sc.name + (sc.detail && /stop|of/.test(sc.detail) ? ', ' + sc.detail : '')) + '\u201d). It is only shared if you choose to send your notes.</p>' +
+      '<label for="cnote">What was confusing? (optional, a few words is plenty)</label><textarea id="cnote" maxlength="' + Notes.MAX_TEXT + '" style="min-height:80px"></textarea>' +
+      '<button class="btn primary" id="cy" style="margin-top:12px">Save note</button><button class="btn" id="cn">Cancel</button></div>';
+    document.body.appendChild(m);
+    setTimeout(function () { var t = m.querySelector('#cnote'); if (t) t.focus(); }, 50);
+    m.querySelector('#cn').onclick = function () { m.remove(); };
+    m.querySelector('#cy').onclick = function () {
+      Notes.addNote(NT, sc.name + (sc.detail && /stop|of/.test(sc.detail) ? ' (' + sc.detail + ')' : ''), m.querySelector('#cnote').value); saveNotes(); m.remove();
+      toast('Noted. Thank you.'); if (route().name === 'notes') keepRender();
+    };
+  }
+
   /* ---------- backup ---------- */
   function vBackup() {
     return '<h2>Back up or restore</h2><p class="soft">Your castles live only on this phone. A backup file lets you keep a copy safe or move to a new phone.</p>' +
@@ -269,15 +348,28 @@
 
   /* ---------- actions ---------- */
   var actions = {
-    goNew: function () { go('#/new'); }, goBackup: function () { go('#/backup'); }, goHome: function () { go('#/home'); },
+    goNew: function () { go('#/new'); }, goNotes: function () { go('#/notes'); },
+    confused: confusedBox, shareNotes: shareNotes,
+    copyNotes: function () {
+      var t = Notes.asText(notesExport());
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function () { toast('Copied. Paste it into a message.'); }, function () { toast('Sorry, I could not copy. Use Share session notes instead.'); });
+      else toast('Copy is not available here. Use Share session notes instead.');
+    },
+    clearNotes: function () { confirmBox('Clear all notes?', 'This removes your notes and the screen trail from this phone.', 'Yes, clear them', function () { NT = Notes.empty(); saveNotes(); keepRender(); }); }, goBackup: function () { go('#/backup'); }, goHome: function () { go('#/home'); },
     goBackSession: function () { go(ui.session ? ui.session.back : '#/home'); },
     hideInstall: function () { S.prefs.hideInstall = true; save(); render(); },
-    mode: function (el) { ui.mode = el.dataset.v; var v = document.getElementById('paste').value; render(); document.getElementById('paste').value = v; },
+    mode: function (el) { ui.mode = el.dataset.v; keepRender(); },
+    level: function (el) { ui.level = parseInt(el.dataset.v, 10); keepRender(); },
     split: function () {
-      var text = document.getElementById('paste').value, parts = splitText(text, ui.mode);
-      if (!parts.length) { toast('Please paste or type some text first.'); return; }
+      var text = document.getElementById('paste').value;
+      if (!text.trim()) { toast('Please paste or type some text first.'); return; }
+      ui.pasteText = text; ui.mode = 'auto'; ui.level = 1; go('#/preview');
+    },
+    usePieces: function () {
+      var parts = proposed(); if (!parts.length) return;
       var c = { id: uid(), title: short(parts[0], 28) || 'My castle', route: '', chunks: parts.map(mkChunk), built: false, created: Date.now() };
-      S.castles.push(c); save(); go('#/edit/' + c.id);
+      logEvent('Used proposed pieces', plural(parts.length, 'piece', 'pieces'));
+      ui.pasteText = ''; S.castles.push(c); save(); go('#/edit/' + c.id);
     },
     example: function () {
       var c = { id: uid(), title: 'The Beatitudes', route: '', example: true, chunks: BEATITUDES.map(mkChunk), built: false, created: Date.now() };
@@ -292,13 +384,20 @@
     join: function (el) {
       var c = castle(route().id), i = idx(c, el.dataset.cid); if (i < 0 || i >= c.chunks.length - 1) return;
       var a = c.chunks[i], b = c.chunks.splice(i + 1, 1)[0]; a.text = (a.text.trim() + '\n' + b.text.trim()).trim();
-      if (b.image && !a.image) a.image = b.image; a.sr = SR.newSr(); save(); keepRender();
+      if (b.image && !a.image) a.image = b.image; a.sr = SR.newSr(); logEvent('Joined two pieces'); save(); keepRender();
     },
     splitAt: function (el) {
       var c = castle(route().id), i = idx(c, el.dataset.cid), ta = app.querySelector('textarea[data-cid="' + el.dataset.cid + '"]');
       var pos = ta.selectionStart, v = ta.value, a = v.slice(0, pos).trim(), b = v.slice(pos).trim();
       if (!a || !b) { toast('Tap inside the text where you want the break, then press Split.'); return; }
-      c.chunks[i].text = a; c.chunks[i].sr = SR.newSr(); c.chunks.splice(i + 1, 0, mkChunk(b)); save(); keepRender();
+      c.chunks[i].text = a; c.chunks[i].sr = SR.newSr(); c.chunks.splice(i + 1, 0, mkChunk(b)); logEvent('Split a piece at cursor'); save(); keepRender();
+    },
+    smaller: function (el) {
+      var c = castle(route().id), i = idx(c, el.dataset.cid), ta = app.querySelector('textarea[data-cid="' + el.dataset.cid + '"]'), parts = Splitter.splitPiece(ta.value);
+      if (parts.length < 2) { toast('That piece is already as small as it can go.'); return; }
+      c.chunks[i].text = parts[0]; c.chunks[i].sr = SR.newSr();
+      for (var n = 1; n < parts.length; n++) c.chunks.splice(i + n, 0, mkChunk(parts[n]));
+      logEvent('Broke a piece into smaller pieces', parts.length + ' parts'); save(); keepRender();
     },
     remove: function (el) { var c = castle(route().id), i = idx(c, el.dataset.cid); if (c.chunks.length <= 1) { toast('A castle needs at least one piece.'); return; } c.chunks.splice(i, 1); save(); keepRender(); },
     addChunk: function () { var c = castle(route().id); c.chunks.push(mkChunk('')); save(); keepRender(); setTimeout(function () { var t = app.querySelectorAll('textarea'); t[t.length - 1].focus(); }, 0); },
@@ -315,12 +414,20 @@
       if (!k) { toast('Every stop already has a name.'); return; } k.stop = el.dataset.v; save(); keepRender();
     },
     toImages: function () {
+      ui.ideaSeed = 0;
       var c = castle(route().id), missing = c.chunks.filter(function (k) { return !k.stop.trim(); }).length;
       if (missing) { toast('Please name a stop for every piece (' + missing + ' to go).'); return; }
       ui.nudge = false; go('#/images/' + c.id + '/0');
     },
     /* images */
     nudge: function () { ui.nudge = !ui.nudge; keepRender(); },
+    moreIdeas: function () { ui.ideaSeed++; logEvent('Asked for different image ideas'); keepRender(); },
+    useIdea: function (el) {
+      var c = castle(route().id), ta = document.getElementById('img'), k = ta && chunk(c, ta.dataset.cid); if (!k) return;
+      var t = el.dataset.text; ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t;
+      k.image = ta.value; save(); logEvent('Used an image idea', 'idea ' + (parseInt(el.dataset.n, 10) + 1));
+      try { ta.scrollIntoView({ block: 'center' }); } catch (e) {} ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); toast('Added. Now make it your own: change anything you like.');
+    },
     imgPrev: function (el) { go('#/images/' + route().id + '/' + (parseInt(el.dataset.i, 10) - 1)); },
     imgNext: function (el) {
       var c = castle(route().id), i = parseInt(el.dataset.i, 10);
@@ -398,7 +505,7 @@
   });
 
   /* ---------- start ---------- */
-  window.MC = { splitText: splitText };
+  window.MC = { split: function (t, o) { return Splitter.split(t, o); } };
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () {});
   render();
 })();

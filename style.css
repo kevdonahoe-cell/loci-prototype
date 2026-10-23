@@ -54,3 +54,11 @@ textarea{min-height:110px;resize:vertical}
 .modal{position:fixed;inset:0;background:rgba(30,40,60,.5);display:flex;align-items:flex-end;justify-content:center;z-index:30}
 .modal>div{background:var(--bg);width:100%;max-width:640px;padding:20px 16px max(20px,env(safe-area-inset-bottom));border-radius:20px 20px 0 0}
 a{color:var(--navy2)}
+
+.piece{font-family:Georgia,serif;font-size:19px;white-space:pre-wrap}
+.idea{display:block;width:100%;text-align:left;min-height:54px;padding:12px 14px;margin:0 0 8px;border-radius:12px;border:1px solid #ecd7a6;background:#fff;color:var(--ink);font:inherit;font-size:16px;line-height:1.4;cursor:pointer}
+.idea:active{background:#fff7e3}
+.confused{text-align:center;margin:18px 0 0}
+.linkbtn{background:transparent;border:0;color:var(--soft);font:inherit;font-size:15px;text-decoration:underline;min-height:44px;padding:8px 12px;cursor:pointer}
+details summary{cursor:pointer;font-weight:600;min-height:32px}
+details pre{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.4;margin:10px 0 0;max-height:320px;overflow:auto}

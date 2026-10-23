@@ -1,5 +1,5 @@
-var CACHE = 'memory-castle-v1';
-var FILES = ['./', './index.html', './style.css', './app.js', './sr.js', './manifest.json',
+var CACHE = 'memory-castle-v2';
+var FILES = ['./', './index.html', './style.css', './app.js', './sr.js', './splitter.js', './ideas.js', './notes.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
