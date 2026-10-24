@@ -10,7 +10,89 @@ const SH = '/workspace/memory-castle-shots/';
   const st = () => p.evaluate(() => JSON.parse(localStorage.getItem('memoryCastle.v1')));
   await p.goto('http://localhost:8765/');
   await p.screenshot({ path: SH + '01-home-empty.png' });
+
+  // ================= induction (practice castle) =================
+  assert.ok((await p.textContent('body')).includes('New to memory castles?'), 'first launch offers the practice');
+  await p.click('text=Skip for now');
+  assert.ok(!(await p.textContent('body')).includes('New to memory castles?'), 'skip hides the offer');
+  assert.ok((await st()).prefs.introSkipped);
+  await p.click('text=Practice castle: how it works');
+  await p.waitForSelector('text=Your memory loves places'); await p.screenshot({ path: SH + '13-intro-explain.png' });
+  await p.click('.sticky >> text=Next'); await p.waitForSelector('text=How it works');
+  await p.click('.sticky >> text=Next'); await p.waitForSelector('text=What makes a good image?'); await p.screenshot({ path: SH + '13b-intro-good-image.png' });
+  await p.click('text=Walk the house');
+  for (let i = 0; i < 5; i++) {
+    await p.waitForSelector('text=Stop ' + (i + 1) + ' of 5');
+    if (i === 0) { assert.equal(await p.textContent('.stop'), 'Front gate'); await p.screenshot({ path: SH + '14-intro-stop.png' }); }
+    if (i === 1) { await p.click('.sticky >> text=Back'); await p.waitForSelector('text=Stop 1 of 5'); await p.click('text=Next stop'); await p.waitForSelector('text=Stop 2 of 5'); }
+    await p.click(i === 4 ? 'text=Test me' : 'text=Next stop');
+  }
+  // recall test reuses the recall screen, image hidden until revealed, no schedule
+  await p.waitForSelector('text=What was waiting here?');
+  assert.equal(await p.locator('.image').count(), 0, 'image hidden during the test');
+  await p.screenshot({ path: SH + '15-intro-recall.png' });
+  const yn = ['Yes', 'Yes', 'No', 'Yes', 'Yes'];
+  for (let i = 0; i < 5; i++) { await p.click('text=Show me'); if (i === 0) { assert.ok((await p.textContent('.reveal')) === 'Milk'); await p.screenshot({ path: SH + '15b-intro-recall-answer.png' }); } await p.click('.rate .btn:has-text("' + yn[i] + '")'); }
+  await p.waitForSelector('text=4 of 5'); assert.ok((await p.textContent('body')).includes('nothing is scheduled'));
+  assert.equal((await st()).castles.length, 0, 'practice items are not saved or scheduled');
+  await p.click('text=Carry on');
+  await p.waitForSelector('text=Now try making one yourself');
+  assert.equal(await p.inputValue('#img'), ''); assert.equal(await p.locator('.idea').count(), 3);
+  await p.click('.idea >> nth=0'); await p.fill('#img', (await p.inputValue('#img')) + ' It fizzes and sparks when I touch it.');
+  await p.click('text=Need a nudge?'); await p.waitForFunction(() => !document.querySelector('#toast.show')); await p.evaluate(() => scrollTo(0, 0)); await p.screenshot({ path: SH + '16-intro-try-yourself.png' });
+  await p.click('.sticky >> text=Next');
+  await p.waitForSelector('text=You\u2019re ready'); assert.ok((await p.textContent('.image')).includes('fizzes'));
+  await p.screenshot({ path: SH + '17-intro-ready.png' });
+  await p.click('text=Back to home');
+  let s0 = await st(); assert.ok(s0.prefs.introDone); assert.equal(s0.castles.length, 0, 'not kept => nothing saved');
+  // run it again, quickly, and keep it this time
+  await p.click('text=Practice castle: how it works');
+  for (let i = 0; i < 3; i++) await p.click('.sticky .btn.primary');
+  for (let i = 0; i < 5; i++) await p.click('.sticky .btn.primary');
+  for (let i = 0; i < 5; i++) { await p.click('text=Show me'); await p.click('.rate .btn:has-text("Yes")'); }
+  await p.click('text=Carry on'); await p.fill('#img', 'A shed full of glowing batteries humming like bees.'); await p.click('.sticky >> text=Next');
+  await p.click('text=Keep the practice castle');
+  await p.waitForSelector('text=Walk through my castle');
+  s0 = await st(); assert.equal(s0.castles.length, 1); assert.equal(s0.castles[0].chunks.length, 6); assert.ok(s0.castles[0].built);
+  assert.ok(s0.castles[0].chunks.every(k => k.sr.level === -1), 'kept castle starts fresh in spaced repeats'); console.log('induction: skip, finish-without-keeping and keep all OK');
+
+  // ================= piece by piece =================
+  await p.goto('http://localhost:8765/#/home');
+  await p.click('text=+ Build a new castle'); await p.waitForSelector('text=How would you like to start?');
+  await p.screenshot({ path: SH + '18-new-choice.png' });
+  await p.click('text=Add piece by piece');
+  await p.fill('#ctitle', 'My Sunday talk'); await p.fill('#route', 'Walk to church');
+  await p.screenshot({ path: SH + '19-pbp-route.png' });
+  await p.click('text=Start with stop 1');
+  await p.click('text=+ Add next stop'); await p.waitForSelector('#toast.show'); assert.ok((await p.textContent('#toast')).includes('name this stop'), 'validation');
+  const pbp = [['Front gate', 'Welcome and thank the choir', 'The choir is singing on top of my front gate, swaying so hard it creaks.'], ['Bus stop', 'Story about the lost umbrella', ''], ['Park bench', 'Close with the invitation to lunch', 'A huge picnic is laid out on the park bench and it smells of sausages.']];
+  for (let i = 0; i < 3; i++) {
+    await p.fill('#pstop', pbp[i][0]); await p.fill('#ptext', pbp[i][1]);
+    if (i === 1) { await p.click('text=Show image ideas'); assert.equal(await p.locator('.idea').count(), 3); const it = await p.locator('.idea >> nth=2').textContent(); assert.ok(/bus stop/i.test(it), it); await p.click('.idea >> nth=2'); await p.screenshot({ path: SH + '20-pbp-stop-ideas.png' }); }
+    else await p.fill('#img', pbp[i][2]);
+    if (i < 2) { await p.click('text=+ Add next stop'); await p.waitForSelector('text=stop ' + (i + 2) + ' of ' + (i + 2)); }
+  }
+  // go back to stop 1 via the chip and edit it, then the Back arrow
+  await p.click('.chip:has-text("1. Front gate")'); await p.waitForFunction(() => document.querySelector('#pstop').value === 'Front gate');
+  await p.fill('#ptext', 'Welcome everyone and thank the choir'); await p.click('#back'); await p.waitForSelector('text=Name your route');
+  await p.click('text=Carry on with the stops'); await p.click('.chip:has-text("3. Park bench")'); await p.waitForFunction(() => document.querySelector('#pstop').value === 'Park bench'); await p.waitForFunction(() => !document.querySelector('#toast.show'));
+  await p.screenshot({ path: SH + '21-pbp-stop.png' });
+  await p.click('text=Finished'); await p.waitForSelector('text=Walk through my castle');
+  s0 = await st(); const pc = s0.castles[1];
+  assert.equal(pc.title, 'My Sunday talk'); assert.equal(pc.route, 'Walk to church'); assert.ok(pc.built); assert.equal(pc.chunks.length, 3);
+  assert.equal(pc.chunks[0].text, 'Welcome everyone and thank the choir'); assert.ok(/bus stop/i.test(pc.chunks[1].image));
+  await p.click('text=In order (first to last)'); assert.equal(await p.textContent('.stop'), 'Front gate');
+  for (let i = 0; i < 3; i++) { await p.click('text=Show me the words'); await p.click('.rate .btn:has-text("Good")'); }
+  await p.waitForSelector('text=Well done'); assert.equal((await st()).castles[1].chunks[2].sr.interval, 1);
+  // unfinished piece-by-piece castle resumes in the builder
+  await p.goto('http://localhost:8765/#/home'); await p.click('text=+ Build a new castle'); await p.click('text=Add piece by piece');
+  await p.click('text=Start with stop 1'); await p.fill('#pstop', 'Letterbox'); await p.fill('#ptext', 'Half-finished');
+  await p.goto('http://localhost:8765/#/home'); await p.click('.card[data-act=openCastle] >> nth=2'); await p.click('text=Carry on setting up');
+  await p.waitForFunction(() => document.querySelector('#pstop') && document.querySelector('#pstop').value === 'Letterbox'); console.log('piece by piece: build, edit, back, ideas, finish, practise, resume all OK');
+  await p.evaluate(() => { localStorage.removeItem('memoryCastle.v1'); localStorage.removeItem('memoryCastle.notes.v1'); }); await p.goto('http://localhost:8765/#/home'); await p.reload();
+  await p.click('text=Skip for now');
   await p.click('text=+ Build a new castle');
+  await p.click('text=Paste it all and I');
   // custom paste: sentence + blank-line splitting
   // ---- Kevin's real shape: intro paragraph + a line + eight 'Happy are those who...' in ONE paragraph (invented text) ----
   const A = ['tend the garden', 'wake early', 'forgive quickly', 'sing in the rain', 'keep their promises', 'listen well', 'laugh at themselves', 'help a stranger'];
@@ -34,7 +116,7 @@ const SH = '/workspace/memory-castle-shots/';
   assert.equal((await st()).castles[0].chunks.length, nPieces);
   // the 'Break into smaller pieces' button on a piece
   await p.goto('http://localhost:8765/#/home'); await p.evaluate(() => localStorage.clear()); await p.reload();
-  await p.click('text=+ Build a new castle');
+  await p.click('text=+ Build a new castle'); await p.click('text=Paste it all and I');
   await p.fill('#paste', 'First line.\nSecond line.\n\nThird block here.');
   await p.click('text=Show me the pieces');
   await p.click('.chip:has-text("Blank lines")');

@@ -15,3 +15,7 @@ Prototype only. Run locally with any static server, e.g. `python3 -m http.server
 - **Session notes** (`notes.js`): "Something confused me" on every screen, and "Share session notes" to export only those notes and the screen trail. Never includes text, images, stop or route names. Stored separately from castles and not part of backups.
 
 Checks: `node test-sr.js && node test-split.js && node test-ideas-notes.js`; the phone-viewport run is `e2e.js` (see header). All sample text in tests is invented.
+
+## Version 0.3
+- **Practice castle (induction):** offered on first launch and from the home screen anytime. Three short screens on the method, a ready-made house with five shopping-list items and example images (each tagged with why it works), a quick recall test (image hidden until revealed, nothing scheduled), one stop where you write your own image (ideas and nudges available), then "You're ready". Completion or skip is saved in localStorage. Practice items only enter spaced repeats if you choose "Keep the practice castle".
+- **Piece by piece:** a new castle can be built by pasting it all (suggested pieces) or stop by stop: name the route, then for each stop name it, add the item, write the image (ideas on request), "Add next stop" or "Finished". Stops can be revisited, edited or removed, and an unfinished castle resumes where you left off. The result is a normal castle.
