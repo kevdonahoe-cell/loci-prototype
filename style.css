@@ -62,3 +62,9 @@ a{color:var(--navy2)}
 .linkbtn{background:transparent;border:0;color:var(--soft);font:inherit;font-size:15px;text-decoration:underline;min-height:44px;padding:8px 12px;cursor:pointer}
 details summary{cursor:pointer;font-weight:600;min-height:32px}
 details pre{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.4;margin:10px 0 0;max-height:320px;overflow:auto}
+
+.cardhead .t.full{font-family:Georgia,serif;font-weight:400;font-size:18px;white-space:pre-wrap}
+.cardhead{align-items:flex-start}
+.cardhead .num{margin-top:2px}
+.piece,.reveal,.image,.cardhead .t,.stop,.chip,.idea,h2,h3{overflow-wrap:anywhere}
+.chip{max-width:100%;text-align:left}

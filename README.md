@@ -19,3 +19,8 @@ Checks: `node test-sr.js && node test-split.js && node test-ideas-notes.js`; the
 ## Version 0.3
 - **Practice castle (induction):** offered on first launch and from the home screen anytime. Three short screens on the method, a ready-made house with five shopping-list items and example images (each tagged with why it works), a quick recall test (image hidden until revealed, nothing scheduled), one stop where you write your own image (ideas and nudges available), then "You're ready". Completion or skip is saved in localStorage. Practice items only enter spaced repeats if you choose "Keep the practice castle".
 - **Piece by piece:** a new castle can be built by pasting it all (suggested pieces) or stop by stop: name the route, then for each stop name it, add the item, write the image (ideas on request), "Add next stop" or "Finished". Stops can be revisited, edited or removed, and an unfinished castle resumes where you left off. The result is a normal castle.
+
+## v0.3.1
+- Full wording everywhere: the route/stops screen no longer cuts long pieces off with "…" (also fixed on the image screen and piece-by-piece stop chips). Text boxes grow to fit their words.
+- **Edit the words** on an existing castle: change, add, remove or reorder pieces; stops and images stay with each piece. Changed pieces restart practice; unchanged pieces keep their progress.
+- Service worker cache v4.

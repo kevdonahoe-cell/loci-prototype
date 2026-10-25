@@ -89,6 +89,32 @@ const SH = '/workspace/memory-castle-shots/';
   await p.click('text=Start with stop 1'); await p.fill('#pstop', 'Letterbox'); await p.fill('#ptext', 'Half-finished');
   await p.goto('http://localhost:8765/#/home'); await p.click('.card[data-act=openCastle] >> nth=2'); await p.click('text=Carry on setting up');
   await p.waitForFunction(() => document.querySelector('#pstop') && document.querySelector('#pstop').value === 'Letterbox'); console.log('piece by piece: build, edit, back, ideas, finish, practise, resume all OK');
+
+  // ================= long pieces are never cut off (v0.3.1 bug: '...' on the stops screen) =================
+  const LONG = 'Happy are those who keep walking in the long dry season, sharing their water with every traveller they meet on the dusty road: they shall find a deep cool well waiting for them at the very end of the journey, and they shall drink until they laugh.';
+  await p.goto('http://localhost:8765/#/home'); await p.click('text=+ Build a new castle'); await p.click('text=Paste it all and I');
+  await p.fill('#paste', LONG + '\nHappy are those who listen well: they shall hear more.');
+  await p.click('text=Show me the pieces'); await p.click('.chip:has-text("Each line")');
+  assert.ok((await p.textContent('.piece >> nth=0')) === LONG, 'preview shows the whole piece');
+  await p.click('text=Use these'); await p.waitForSelector('text=Check the pieces');
+  const taFits = () => p.evaluate(() => Array.from(document.querySelectorAll('textarea')).every(t => t.scrollHeight <= t.clientHeight + 2));
+  assert.ok(await taFits(), 'edit textareas grow to show all the words');
+  await p.click('text=Next: choose your route'); await p.waitForSelector('text=Choose a place you know well');
+  assert.equal((await p.textContent('.cardhead .t >> nth=0')).trim(), LONG, 'stops screen shows the whole piece');
+  await p.fill('input[data-field=stop] >> nth=0', 'Well'); await p.fill('input[data-field=stop] >> nth=1', 'Bucket');
+  await p.screenshot({ path: SH + '22-stops-long-piece.png' });
+  await p.click('text=Next: make your images'); await p.waitForSelector('text=Picture it at this stop');
+  assert.ok((await p.textContent('.piece')).includes('drink until they laugh'), 'image screen shows the whole piece');
+  await p.fill('#img', 'A long ' + 'very '.repeat(60) + 'long image description that should be fully visible.');
+  assert.ok(await taFits(), 'image box grows');
+  await p.click('text=Next stop'); await p.waitForSelector('text=Finish my castle'); await p.fill('#img', 'Ears on a bucket.'); await p.click('text=Finish my castle');
+  await p.click('text=Walk through my castle'); await p.click('text=Tap to show the words'); await p.waitForSelector('.reveal'); assert.equal(await p.textContent('.reveal'), LONG, 'walk-through reveal shows it all');
+  assert.ok((await p.textContent('.image')).includes('fully visible'));
+  await p.click('#back'); await p.waitForSelector('text=In order (first to last)'); await p.click('text=In order (first to last)'); await p.click('text=Show me the words');
+  assert.equal(await p.textContent('.reveal'), LONG, 'recall reveal shows it all'); await p.screenshot({ path: SH + '23-recall-long-piece.png', fullPage: true });
+  const ell = await p.evaluate(() => Array.from(document.querySelectorAll('#app .reveal, #app .piece, #app .image, #app .stop, #app .cardhead .t')).some(e => e.textContent.includes('\u2026'))); assert.ok(!ell, 'no ellipsis in piece, stop or image text (only the default castle title is abbreviated)');
+  const ov2 = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth); assert.ok(ov2 <= 0, 'no sideways overflow');
+  console.log('long piece: preview, edit, stops, images, walk, recall all show full text');
   await p.evaluate(() => { localStorage.removeItem('memoryCastle.v1'); localStorage.removeItem('memoryCastle.notes.v1'); }); await p.goto('http://localhost:8765/#/home'); await p.reload();
   await p.click('text=Skip for now');
   await p.click('text=+ Build a new castle');
@@ -217,6 +243,30 @@ const SH = '/workspace/memory-castle-shots/';
   await p.click('text=Show me the words');
   assert.ok(!(await p.textContent('.rate')).includes('no change'));
   await p.screenshot({ path: SH + '10-confused-on-recall.png' });
+
+  // ================= Edit the words on an existing castle =================
+  {
+    const cid = (await st()).castles[1].id, before = (await st()).castles[1].chunks;
+    await p.goto('http://localhost:8765/#/castle/' + cid); await p.click('text=Edit the words'); await p.waitForSelector('h2:has-text("Edit the words")');
+    assert.ok((await p.textContent('body')).includes('at Front gate'), 'edit cards show their stop');
+    await p.fill('textarea[data-field=text] >> nth=1', 'Gentle people, now with my own words');
+    let c1 = (await st()).castles[1].chunks; assert.equal(c1[1].sr.level, -1, 'changed piece resets progress'); assert.deepEqual(c1[0].sr, before[0].sr, 'unchanged piece keeps progress');
+    assert.equal(c1[1].stop, before[1].stop); assert.equal(c1[1].image, before[1].image, 'stop and image kept');
+    await p.fill('textarea[data-field=text] >> nth=1', before[1].text); assert.deepEqual((await st()).castles[1].chunks[1].sr, before[1].sr, 'changing it back restores progress');
+    await p.fill('textarea[data-field=text] >> nth=2', 'Those who mourn, reworded');
+    await p.click('button[data-act=down] >> nth=3'); // reorder 4 and 5
+    await p.click('text=+ Add a piece'); await p.fill('textarea[data-field=text] >> nth=8', 'A brand new ninth piece');
+    await p.screenshot({ path: SH + '24-edit-the-words.png' });
+    await p.click('.sticky >> text=Done'); await p.waitForSelector('text=Choose a place you know well');
+    await p.fill('input[data-field=stop] >> nth=8', 'Clothesline'); await p.click('text=Next: make your images');
+    for (let i = 0; i < 8; i++) { await p.click('text=Next stop'); await p.waitForFunction(n => location.hash.endsWith('/' + n), i + 1); }
+    await p.fill('#img', 'Socks pegged on the clothesline sing in the wind.'); await p.click('text=Finish my castle');
+    const after = (await st()).castles[1].chunks;
+    assert.equal(after.length, 9); assert.equal(after[2].text, 'Those who mourn, reworded'); assert.equal(after[2].sr.level, -1);
+    assert.equal(after[3].id, before[4].id, 'reordered'); assert.deepEqual(after[3].sr, before[4].sr, 'moved piece keeps progress'); assert.equal(after[3].image, before[4].image);
+    assert.deepEqual(after[0].sr, before[0].sr); assert.equal(after[8].stop, 'Clothesline'); assert.ok(after.every(k => !k.orig));
+    console.log('edit the words: change/reset, revert/restore, reorder, add with new stop all OK');
+  }
   // session notes: share exports only notes + trail
   await p.goto('http://localhost:8765/#/notes'); await p.waitForSelector('text=What never gets shared');
   assert.equal((await st()) && JSON.parse(await p.evaluate(() => localStorage.getItem('memoryCastle.notes.v1'))).notes.length, 2);

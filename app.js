@@ -1,7 +1,7 @@
 /* Memory Castle prototype - vanilla JS, data stays in this browser (localStorage). */
 (function () {
   'use strict';
-  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.3';
+  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.3.1';
   var app = document.getElementById('app'), back = document.getElementById('back'),
       bartitle = document.getElementById('bartitle'), toastEl = document.getElementById('toast');
 
@@ -107,6 +107,7 @@
     bartitle.textContent = title;
     var sc = screenInfo(r, c);
     if (sc.key !== ui.lastKey) { ui.lastKey = sc.key; Notes.addTrail(NT, 'screen', sc.name, sc.detail); saveNotes(); }
+    setTimeout(autosizeAll, 0);
     app.innerHTML = html + '<div class="confused"><button class="linkbtn" data-act="confused">\ud83e\udd14 Something confused me</button></div>';
   }
 
@@ -130,6 +131,10 @@
     }
     return { key: 'home', name: 'Home' };
   }
+
+  /* textareas grow to show all their text, so nothing is hidden behind an inner scroll */
+  function autosize(t) { if (!t || t.id === 'paste') return; t.style.height = 'auto'; t.style.height = (t.scrollHeight + 4) + 'px'; }
+  function autosizeAll() { Array.prototype.forEach.call(app.querySelectorAll('textarea'), autosize); }
 
   /* ---------- views ---------- */
   function vHome() {
@@ -186,11 +191,12 @@
   }
 
   function vEdit(c) {
-    var h = '<h2>Check the pieces</h2><p class="soft">Each piece gets its own place in your castle. Keep each one small enough to picture. You can edit, join, split or reorder.</p>';
+    var h = c.built ? '<h2>Edit the words</h2><p class="soft">Change the words of any piece, or add, remove, join, split or reorder pieces.</p><div class="card gold small">Your stops and images stay with each piece. Pieces whose words you change start their practice again; unchanged pieces keep their progress.</div>'
+      : '<h2>Check the pieces</h2><p class="soft">Each piece gets its own place in your castle. Keep each one small enough to picture. You can edit, join, split or reorder.</p>';
     if (c.example) h += '<div class="card gold small"><b>About this example.</b> These are only short reminder titles, not the Bible text (it is under copyright). To remember the actual words, paste your own copy into each piece.</div>';
     h += '<label for="ctitle">Name of this castle</label><input type="text" id="ctitle" value="' + esc(c.title) + '" data-cfield="title">';
     c.chunks.forEach(function (k, i) {
-      h += '<div class="card" style="margin-top:14px"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t soft small">Piece ' + (i + 1) + ' of ' + c.chunks.length + '</span></div>' +
+      h += '<div class="card" style="margin-top:14px"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t soft small">Piece ' + (i + 1) + ' of ' + c.chunks.length + (c.built ? (k.stop ? ' \u00b7 at ' + esc(k.stop) : ' \u00b7 needs a stop') + (k.orig && k.text.trim() !== k.orig.text.trim() ? ' \u00b7 <b>changed</b>' : '') : '') + '</span></div>' +
         (Splitter.wordCount(k.text) > 40 ? '<p class="small soft" style="margin:0 0 6px">This one is long (' + Splitter.wordCount(k.text) + ' words). Try \u201cBreak into smaller pieces\u201d.</p>' : '') +
         '<textarea data-field="text" data-cid="' + k.id + '" aria-label="Piece ' + (i + 1) + '">' + esc(k.text) + '</textarea><div class="ops">' +
         '<button class="btn small" data-act="up" data-cid="' + k.id + '"' + (i === 0 ? ' disabled' : '') + ' aria-label="Move up">\u2191 Up</button>' +
@@ -201,7 +207,7 @@
         '<button class="btn small danger" data-act="remove" data-cid="' + k.id + '">Remove</button></div></div>';
     });
     h += '<button class="btn" data-act="addChunk">+ Add a piece</button><div style="height:70px"></div>' +
-      '<div class="sticky"><button class="btn primary" data-act="toStops">Next: choose your route</button></div>';
+      '<div class="sticky"><button class="btn primary" data-act="' + (c.built ? 'editDone' : 'toStops') + '">' + (c.built ? 'Done' : 'Next: choose your route') + '</button></div>';
     return h;
   }
 
@@ -216,7 +222,7 @@
       h += '<p class="small soft">Tap an idea to use it for the next empty stop, or ignore these and type your own.</p><div class="chips">' + list.map(function (s) { return '<button class="chip" data-act="idea" data-v="' + esc(s) + '">' + esc(s) + '</button>'; }).join('') + '</div>';
     }
     c.chunks.forEach(function (k, i) {
-      h += '<div class="card"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t">' + esc(short(k.text, 60)) + '</span></div>' +
+      h += '<div class="card"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t full">' + esc(k.text) + '</span></div>' +
         '<input type="text" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="Stop ' + (i + 1) + ' along your route" aria-label="Stop for piece ' + (i + 1) + '"></div>';
     });
     h += '<div style="height:70px"></div><div class="sticky"><button class="btn primary" data-act="toImages">Next: make your images</button></div>';
@@ -227,7 +233,7 @@
     var i = Math.min(Math.max(n, 0), c.chunks.length - 1), k = c.chunks[i], last = i === c.chunks.length - 1;
     var h = '<div class="progress"><i style="width:' + Math.round((i + 1) / c.chunks.length * 100) + '%"></i></div><p class="soft small">Stop ' + (i + 1) + ' of ' + c.chunks.length + '</p>' +
       '<div class="stop">' + esc(k.stop || 'Stop ' + (i + 1)) + '</div>' +
-      '<div class="card"><div class="small soft">Remember this</div><div style="font-family:Georgia,serif;font-size:20px;white-space:pre-wrap">' + esc(short(k.text, 300)) + '</div></div>' +
+      '<div class="card"><div class="small soft">Remember this</div><div class="piece" style="font-size:20px">' + esc(k.text) + '</div></div>' +
       ideasCard(k, i) +
       '<label for="img">Picture it at this stop. What do you see?</label>' +
       '<textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
@@ -292,7 +298,7 @@
     }
     while (c.chunks.length < n) c.chunks.push(mkChunk(''));
     var k = c.chunks[n - 1], h = '<p class="soft small">' + esc(c.route || 'Your route') + ' \u00b7 stop ' + n + (c.chunks.length > 1 ? ' of ' + c.chunks.length : '') + '</p>';
-    if (c.chunks.length > 1) h += '<div class="chips">' + c.chunks.map(function (x, j) { return '<button class="chip' + (j === n - 1 ? ' on' : '') + '" data-act="pieceGo" data-n="' + (j + 1) + '">' + (j + 1) + '. ' + esc(short(x.stop || '(no name)', 18)) + '</button>'; }).join('') + '</div>';
+    if (c.chunks.length > 1) h += '<div class="chips">' + c.chunks.map(function (x, j) { return '<button class="chip' + (j === n - 1 ? ' on' : '') + '" data-act="pieceGo" data-n="' + (j + 1) + '">' + (j + 1) + '. ' + esc(x.stop || '(no name)') + '</button>'; }).join('') + '</div>';
     h += '<label for="pstop">1. Name this stop</label><input type="text" id="pstop" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="e.g. Front gate">' +
       '<label for="ptext">2. What do you want to remember here?</label><textarea id="ptext" data-field="text" data-cid="' + k.id + '" style="min-height:90px" placeholder="Paste or type one small piece\u2026">' + esc(k.text) + '</textarea>' +
       '<label for="img">3. Picture it at this stop. What do you see?</label><textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
@@ -328,7 +334,7 @@
       '<button class="btn" data-act="practice" data-v="back" data-id="' + c.id + '">Backwards (last to first)</button>' +
       '<button class="btn" data-act="practice" data-v="rand" data-id="' + c.id + '">Random stops</button>' +
       '<h3 style="margin-top:18px">Change things</h3>' +
-      '<button class="btn" data-act="goEdit" data-id="' + c.id + '">Edit the text and pieces</button>' +
+      '<button class="btn" data-act="goEdit" data-id="' + c.id + '">Edit the words</button>' +
       '<button class="btn" data-act="goStops" data-id="' + c.id + '">Edit my route and stops</button>' +
       '<button class="btn" data-act="goImages" data-id="' + c.id + '">Edit my images</button>' +
       '<button class="btn danger" data-act="del" data-id="' + c.id + '">Delete this castle</button>';
@@ -556,6 +562,18 @@
     },
     remove: function (el) { var c = castle(route().id), i = idx(c, el.dataset.cid); if (c.chunks.length <= 1) { toast('A castle needs at least one piece.'); return; } c.chunks.splice(i, 1); save(); keepRender(); },
     addChunk: function () { var c = castle(route().id); c.chunks.push(mkChunk('')); save(); keepRender(); setTimeout(function () { var t = app.querySelectorAll('textarea'); t[t.length - 1].focus(); }, 0); },
+    editDone: function () {
+      var c = castle(route().id);
+      if (!c.chunks.some(function (k) { return k.text.trim(); })) { toast('Add some text to at least one piece first.'); return; }
+      c.chunks = c.chunks.filter(function (k) { return k.text.trim(); });
+      var changed = c.chunks.filter(function (k) { return k.orig && k.text.replace(/\s+/g, ' ').trim() !== k.orig.text.replace(/\s+/g, ' ').trim(); }).length;
+      c.chunks.forEach(function (k) { delete k.orig; });
+      c.title = c.title.trim() || short(c.chunks[0].text, 28);
+      var missing = c.chunks.filter(function (k) { return !k.stop.trim(); }).length;
+      save(); logEvent('Edited the words', changed + ' changed, ' + plural(c.chunks.length, 'piece', 'pieces'));
+      if (missing) { toast('Please name a stop for ' + (missing === 1 ? 'the new piece.' : 'the ' + missing + ' new pieces.')); go('#/stops/' + c.id); return; }
+      toast(changed ? 'Saved. ' + plural(changed, 'changed piece starts', 'changed pieces start') + ' practice again.' : 'Saved.'); go('#/castle/' + c.id);
+    },
     toStops: function () {
       var c = castle(route().id);
       if (!c.chunks.some(function (k) { return k.text.trim(); })) { toast('Add some text to at least one piece first.'); return; }
@@ -579,7 +597,7 @@
     moreIdeas: function () { ui.ideaSeed++; logEvent('Asked for different image ideas'); keepRender(); },
     useIdea: function (el) {
       var c = castle(route().id), ta = document.getElementById('img'), k = ta && chunk(c, ta.dataset.cid); if (!k) return;
-      var t = el.dataset.text; ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t;
+      var t = el.dataset.text; ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t; autosize(ta);
       k.image = ta.value; save(); logEvent('Used an image idea', 'idea ' + (parseInt(el.dataset.n, 10) + 1));
       try { ta.scrollIntoView({ block: 'center' }); } catch (e) {} ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); toast('Added. Now make it your own: change anything you like.');
     },
@@ -614,7 +632,7 @@
     show: function () { ui.session.shown = true; keepRender(); },
     rate: function (el) {
       var s = ui.session, it = s.items[s.i], c = castle(it.cid), k = chunk(c, it.kid), r = el.dataset.v;
-      if (!s.practiceOnly) k.sr = SR.apply(k.sr, r, SR.today()); s.tally[r]++; save();
+      if (!s.practiceOnly) { k.sr = SR.apply(k.sr, r, SR.today()); delete k.orig; } s.tally[r]++; save();
       s.i++; s.shown = false; if (s.i >= s.items.length) s.done = true; render();
     },
     /* backup */
@@ -622,6 +640,12 @@
     pickFile: function () { document.getElementById('file').click(); }
   };
 
+  /* editing the words of a built castle: changed pieces restart their practice, unchanged (or changed back) keep it */
+  function textChanged(k, v) {
+    if (!k.orig) k.orig = { text: k.text, sr: k.sr };
+    var same = String(v).replace(/\s+/g, ' ').trim() === String(k.orig.text).replace(/\s+/g, ' ').trim();
+    k.sr = same ? k.orig.sr : SR.newSr();
+  }
   function stepRoute(c) {
     if (c.pbp && !c.built) return '#/piece/' + c.id + '/' + (c.chunks.length ? c.chunks.length : 0);
     if (!c.chunks.length) return '#/new';
@@ -652,9 +676,14 @@
   });
   // Save as you type (no re-render, so the keyboard stays open).
   document.addEventListener('input', function (e) {
+    if (e.target.tagName === 'TEXTAREA') autosize(e.target);
     var t = e.target, c = castle(route().id); if (!c) return;
     if (t.dataset.cfield) { c[t.dataset.cfield] = t.value; save(); }
-    else if (t.dataset.field) { var k = chunk(c, t.dataset.cid); if (k) { k[t.dataset.field] = t.value; save(); } }
+    else if (t.dataset.field) {
+      var k = chunk(c, t.dataset.cid); if (!k) return;
+      if (t.dataset.field === 'text' && c.built && !c.practice) textChanged(k, t.value);
+      k[t.dataset.field] = t.value; save();
+    }
   });
   document.addEventListener('change', function (e) {
     if (e.target.id === 'file' && e.target.files[0]) { var rd = new FileReader(); rd.onload = function () { importData(rd.result); }; rd.readAsText(e.target.files[0]); }
