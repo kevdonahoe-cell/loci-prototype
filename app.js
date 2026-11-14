@@ -1,7 +1,7 @@
 /* Memory Castle prototype - vanilla JS, data stays in this browser (localStorage). */
 (function () {
   'use strict';
-  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.3.1';
+  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.3.2';
   var app = document.getElementById('app'), back = document.getElementById('back'),
       bartitle = document.getElementById('bartitle'), toastEl = document.getElementById('toast');
 
@@ -215,6 +215,7 @@
     var h = '<h2>Choose a place you know well</h2><p class="soft">Think of a route you could walk with your eyes closed: your home, your street, your walk to work or to church.</p>' +
       '<label for="route">Name of your place or route</label><input type="text" id="route" data-cfield="route" value="' + esc(c.route) + '" placeholder="e.g. My childhood home">' +
       '<label>Name one stop for each piece, in the order you would walk</label>' +
+      '<div class="card gold small">Just name the place in a few words, like <b>Front door</b> or <b>Hall table</b>. You will make the picture in the next step.</div>' +
       '<div class="chips"><button class="chip' + (ui.ideas === 'house' ? ' on' : '') + '" data-act="ideas" data-v="house">Ideas: a house</button><button class="chip' + (ui.ideas === 'walk' ? ' on' : '') + '" data-act="ideas" data-v="walk">Ideas: a walk</button></div>';
     if (ui.ideas) {
       var used = c.chunks.map(function (k) { return k.stop.toLowerCase(); });
@@ -223,7 +224,7 @@
     }
     c.chunks.forEach(function (k, i) {
       h += '<div class="card"><div class="cardhead"><span class="num">' + (i + 1) + '</span><span class="t full">' + esc(k.text) + '</span></div>' +
-        '<input type="text" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="Stop ' + (i + 1) + ' along your route" aria-label="Stop for piece ' + (i + 1) + '"></div>';
+        '<input type="text" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="A few words, e.g. Front door" aria-label="Stop for piece ' + (i + 1) + '"></div>';
     });
     h += '<div style="height:70px"></div><div class="sticky"><button class="btn primary" data-act="toImages">Next: make your images</button></div>';
     return h;
@@ -232,7 +233,7 @@
   function vImages(c, n) {
     var i = Math.min(Math.max(n, 0), c.chunks.length - 1), k = c.chunks[i], last = i === c.chunks.length - 1;
     var h = '<div class="progress"><i style="width:' + Math.round((i + 1) / c.chunks.length * 100) + '%"></i></div><p class="soft small">Stop ' + (i + 1) + ' of ' + c.chunks.length + '</p>' +
-      '<div class="stop">' + esc(k.stop || 'Stop ' + (i + 1)) + '</div>' +
+      '<div class="stop">' + esc(k.stop || 'Stop ' + (i + 1)) + '</div>' + longStopBlock(k) +
       '<div class="card"><div class="small soft">Remember this</div><div class="piece" style="font-size:20px">' + esc(k.text) + '</div></div>' +
       ideasCard(k, i) +
       '<label for="img">Picture it at this stop. What do you see?</label>' +
@@ -299,7 +300,7 @@
     while (c.chunks.length < n) c.chunks.push(mkChunk(''));
     var k = c.chunks[n - 1], h = '<p class="soft small">' + esc(c.route || 'Your route') + ' \u00b7 stop ' + n + (c.chunks.length > 1 ? ' of ' + c.chunks.length : '') + '</p>';
     if (c.chunks.length > 1) h += '<div class="chips">' + c.chunks.map(function (x, j) { return '<button class="chip' + (j === n - 1 ? ' on' : '') + '" data-act="pieceGo" data-n="' + (j + 1) + '">' + (j + 1) + '. ' + esc(x.stop || '(no name)') + '</button>'; }).join('') + '</div>';
-    h += '<label for="pstop">1. Name this stop</label><input type="text" id="pstop" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="e.g. Front gate">' +
+    h += '<label for="pstop">1. Name this stop (just a few words)</label><input type="text" id="pstop" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="e.g. Front gate">' +
       '<label for="ptext">2. What do you want to remember here?</label><textarea id="ptext" data-field="text" data-cid="' + k.id + '" style="min-height:90px" placeholder="Paste or type one small piece\u2026">' + esc(k.text) + '</textarea>' +
       '<label for="img">3. Picture it at this stop. What do you see?</label><textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
       '<button class="btn small" data-act="pbpIdeas" style="margin-top:8px">' + (ui.pbpIdeas ? 'Hide image ideas' : 'Show image ideas') + '</button>';
@@ -593,6 +594,11 @@
       ui.nudge = false; go('#/images/' + c.id + '/0');
     },
     /* images */
+    moveStop: function (el) {
+      var c = castle(route().id), k = chunk(c, el.dataset.cid); if (!k) return;
+      var t = k.stop.trim(); k.image = k.image.trim() ? k.image.replace(/\s+$/, '') + '\n\n' + t : t; k.stop = shortStop(t);
+      ui.moved = k.id; save(); logEvent('Moved a long stop name into the image'); keepRender();
+    },
     nudge: function () { ui.nudge = !ui.nudge; keepRender(); },
     moreIdeas: function () { ui.ideaSeed++; logEvent('Asked for different image ideas'); keepRender(); },
     useIdea: function (el) {
@@ -646,11 +652,19 @@
     var same = String(v).replace(/\s+/g, ' ').trim() === String(k.orig.text).replace(/\s+/g, ' ').trim();
     k.sr = same ? k.orig.sr : SR.newSr();
   }
+  function longStop(k) { var t = String(k.stop || '').trim(); return t.length > 40 || t.split(/\s+/).length > 6; }
+  function shortStop(t) { var w = String(t).replace(/\(.*?\)/g, ' ').replace(/[.,;:!?].*$/, '').trim().split(/\s+/).slice(0, 4).join(' '); return w || 'My stop'; }
+  function longStopBlock(k) {
+    if (ui.moved === k.id) return '<div class="card gold"><p class="small" style="margin-top:0">Moved into your image below. Now give this stop a short name:</p><input type="text" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" aria-label="Short stop name"></div>';
+    if (!longStop(k)) return '';
+    return '<div class="card gold"><p class="small" style="margin-top:0">This stop name looks like a picture. Would you like to move it into the image box?</p><button class="btn small warm" data-act="moveStop" data-cid="' + k.id + '">Move it into my image</button></div>';
+  }
   function stepRoute(c) {
     if (c.pbp && !c.built) return '#/piece/' + c.id + '/' + (c.chunks.length ? c.chunks.length : 0);
     if (!c.chunks.length) return '#/new';
     if (c.chunks.some(function (k) { return !k.stop.trim(); })) return '#/stops/' + c.id;
-    return '#/images/' + c.id + '/0';
+    var b = 0; while (b < c.chunks.length - 1 && c.chunks[b].image.trim()) b++;
+    return '#/images/' + c.id + '/' + b;
   }
   function idx(c, id) { for (var i = 0; i < c.chunks.length; i++) if (c.chunks[i].id === id) return i; return -1; }
   function moveChunk(id, d) {
