@@ -1,7 +1,7 @@
 /* Memory Castle prototype - vanilla JS, data stays in this browser (localStorage). */
 (function () {
   'use strict';
-  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.3.2';
+  var KEY = 'memoryCastle.v1', NKEY = 'memoryCastle.notes.v1', VERSION = '0.4.0';
   var app = document.getElementById('app'), back = document.getElementById('back'),
       bartitle = document.getElementById('bartitle'), toastEl = document.getElementById('toast');
 
@@ -14,7 +14,8 @@
     try { var d = JSON.parse(localStorage.getItem(KEY)); if (d && d.castles) { d.prefs = d.prefs || {}; return d; } } catch (e) {}
     return { castles: [], prefs: {} };
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Sorry, I could not save on this phone.'); } }
+  function save(quiet) { if (quiet !== true) S.prefs.changedAt = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Sorry, I could not save on this phone.'); } }
+  function saveQuiet() { save(true); }
   function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
   function castle(id) { if (id === 'practice') return practiceCastle(); for (var i = 0; i < S.castles.length; i++) if (S.castles[i].id === id) return S.castles[i]; return null; }
   function chunk(c, id) { for (var i = 0; i < c.chunks.length; i++) if (c.chunks[i].id === id) return c.chunks[i]; return c.own && c.own.id === id ? c.own : null; }
@@ -61,7 +62,7 @@
   var NUDGES = ['Make it odd. Strange pictures stick better than sensible ones.', 'Make it big. Giants, mountains, enormous or tiny.', 'Make it move. Something crashing, dancing, pouring, climbing.', 'Make it funny. If it makes you smile, you will remember it.', 'Use your senses. What can you smell, hear, taste or feel there?', 'Put yourself in the picture. What are you doing? How do you feel?'];
 
   /* ---------- router ---------- */
-  var ui = { practice: null, pbpIdeas: false, session: null, reveal: false, nudge: false, ideas: '', mode: 'auto', level: 1, pasteText: '', ideaSeed: 0, lastKey: '' };
+  var ui = { practice: null, pbpIdeas: false, session: null, reveal: false, nudge: false, ideas: '', mode: 'auto', level: 1, pasteText: '', ideaSeed: 0, idea: null, hashSeen: '', backupLink: null, lastKey: '' };
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function route() { var p = (location.hash || '#/home').replace(/^#\/?/, '').split('/'); return { name: p[0] || 'home', id: p[1], n: parseInt(p[2], 10) || 0 }; }
   function parentOf(r) {
@@ -85,6 +86,7 @@
 
   function render() {
     var r = route(), c = castle(r.id), html = '', title = 'Memory Castle';
+    if (ui.hashSeen !== location.hash) { ui.hashSeen = location.hash; ui.idea = null; }
     window.scrollTo(0, 0);
     back.hidden = r.name === 'home';
     if (r.name !== 'home' && r.name !== 'new' && r.name !== 'backup' && r.name !== 'recall' && r.name !== 'preview' && r.name !== 'notes' && r.name !== 'paste' && !c) { go('#/home'); return; }
@@ -140,6 +142,7 @@
   function vHome() {
     var due = totalDue(), h = '';
     if (!S.prefs.introDone && !S.prefs.introSkipped) h += '<div class="card gold"><h3>New to memory castles?</h3><p class="small">Take a short practice walk through a ready-made house first. It takes about three minutes, and you can skip it.</p><button class="btn warm" data-act="introStart">Start the practice castle</button><button class="btn small" data-act="introSkip">Skip for now</button></div>';
+    h += backupReminder();
     if (!S.castles.length) {
       h += '<h2>Welcome</h2><div class="card"><p>A memory castle helps you keep words in your head by hanging each piece on a place you already know well, like your own home or your walk to work.</p>' +
         '<p>You choose the place and you make the pictures. I will guide you and bring each piece back at just the right time.</p>' +
@@ -235,10 +238,9 @@
     var h = '<div class="progress"><i style="width:' + Math.round((i + 1) / c.chunks.length * 100) + '%"></i></div><p class="soft small">Stop ' + (i + 1) + ' of ' + c.chunks.length + '</p>' +
       '<div class="stop">' + esc(k.stop || 'Stop ' + (i + 1)) + '</div>' + longStopBlock(k) +
       '<div class="card"><div class="small soft">Remember this</div><div class="piece" style="font-size:20px">' + esc(k.text) + '</div></div>' +
-      ideasCard(k, i) +
       '<label for="img">Picture it at this stop. What do you see?</label>' +
       '<textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
-      nudgeBlock();
+      ideaBox(c, k) + nudgeBlock();
     h += '<div style="height:80px"></div><div class="sticky"><div class="row" style="max-width:640px;margin:0 auto">' +
       '<button class="btn" data-act="imgPrev" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + ' style="margin:0">Back</button>' +
       '<button class="btn primary" data-act="imgNext" data-i="' + i + '" style="margin:0">' + (last ? 'Finish my castle' : 'Next stop') + '</button></div></div>';
@@ -275,8 +277,8 @@
       var o = c.own;
       return introBar(n) + '<h2>Now try making one yourself</h2><p class="soft">Your turn. There is one more stop in the house and one more thing on the list. Make your own picture: you are the artist.</p>' +
         '<div class="stop">' + esc(o.stop) + '</div><div class="card"><div class="small soft">Remember</div><div class="piece" style="font-size:24px">' + esc(o.text) + '</div></div>' +
-        ideasCard(o, 0) + '<label for="img">Picture it at the garden shed. What do you see?</label>' +
-        '<textarea id="img" data-field="image" data-cid="' + o.id + '" placeholder="Write the picture in your own words\u2026">' + esc(o.image) + '</textarea>' + nudgeBlock() + introNav(n, 'Next');
+        '<label for="img">Picture it at the garden shed. What do you see?</label>' +
+        '<textarea id="img" data-field="image" data-cid="' + o.id + '" placeholder="Write the picture in your own words\u2026">' + esc(o.image) + '</textarea>' + ideaBox(c, o) + nudgeBlock() + introNav(n, 'Next');
     }
     var mine = c.own.image.trim();
     return introBar(INTRO_READY) + '<h2>You\u2019re ready \ud83c\udf89</h2><div class="card"><p>That is the whole method: a route you know, one vivid image at each stop, and a walk through it in your head.</p>' +
@@ -303,8 +305,7 @@
     h += '<label for="pstop">1. Name this stop (just a few words)</label><input type="text" id="pstop" data-field="stop" data-cid="' + k.id + '" value="' + esc(k.stop) + '" placeholder="e.g. Front gate">' +
       '<label for="ptext">2. What do you want to remember here?</label><textarea id="ptext" data-field="text" data-cid="' + k.id + '" style="min-height:90px" placeholder="Paste or type one small piece\u2026">' + esc(k.text) + '</textarea>' +
       '<label for="img">3. Picture it at this stop. What do you see?</label><textarea id="img" data-field="image" data-cid="' + k.id + '" placeholder="Write the picture in your own words\u2026">' + esc(k.image) + '</textarea>' +
-      '<button class="btn small" data-act="pbpIdeas" style="margin-top:8px">' + (ui.pbpIdeas ? 'Hide image ideas' : 'Show image ideas') + '</button>';
-    if (ui.pbpIdeas) h += ideasCard(k, n - 1);
+      ideaBox(c, k);
     h += nudgeBlock() + (c.chunks.length > 1 ? '<div><button class="btn small danger" data-act="pieceRemove" data-n="' + n + '" style="margin-top:6px">Remove this stop</button></div>' : '');
     var isLast = n === c.chunks.length;
     h += '<div style="height:80px"></div><div class="sticky"><div class="row" style="max-width:640px;margin:0 auto">' +
@@ -313,11 +314,17 @@
     return h;
   }
 
-  function ideasCard(k, i) {
-    var list = Ideas.ideas(k.stop, k.text, ui.ideaSeed);
-    return '<div class="card gold"><p style="margin-bottom:8px"><b>Not sure where to start?</b></p><p class="small" style="margin-bottom:10px">Here are three ideas in words. Tap one to use it as a starting point, then change it to make it yours. Or ignore them and write your own. You are the artist.</p>' +
-      list.map(function (t, n) { return '<button class="idea" data-act="useIdea" data-n="' + n + '" data-text="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') +
-      '<button class="btn small" data-act="moreIdeas" style="margin:4px 0 0">Show different ideas</button></div>';
+  /* One idea at a time. Boxes start empty; the first castle also shows one idea as a worked example. */
+  function isFirstCastle(c) { return !c.practice && S.castles.length > 0 && S.castles[0].id === c.id; }
+  function ideaBox(c, k) {
+    var open = ui.idea && ui.idea.id === k.id, example = isFirstCastle(c) && !k.image.trim() && !(ui.idea && ui.idea.closed === k.id);
+    if (!open && !example) return '<button class="btn small" data-act="giveIdea" data-cid="' + k.id + '" style="margin-top:8px">\ud83d\udca1 Give me an idea</button>';
+    var list = Ideas.ideas(k.stop, k.text, 0), n = open ? ui.idea.n : 0, t = list[n % list.length];
+    return '<div class="card gold" style="margin-top:10px"><p class="small" style="margin:0 0 8px"><b>' + (example && !open ? 'An example, to show how it works' : 'One idea to start from') + '</b></p>' +
+      '<p id="ideatext" style="margin:0 0 10px">' + esc(t) + '</p>' +
+      '<div class="row"><button class="btn small warm" data-act="useIdea" data-cid="' + k.id + '" data-text="' + esc(t) + '" style="margin:0">Use this idea</button>' +
+      '<button class="btn small" data-act="diffIdea" data-cid="' + k.id + '" style="margin:0">Different idea</button></div>' +
+      '<p class="small soft" style="margin:8px 0 0">Using it copies it into your box. Then change anything you like, so it becomes yours.</p></div>';
   }
 
   function vCastle(c) {
@@ -436,32 +443,103 @@
     };
   }
 
-  /* ---------- backup ---------- */
-  function vBackup() {
-    return '<h2>Back up or restore</h2><p class="soft">Your castles live only on this phone. A backup file lets you keep a copy safe or move to a new phone.</p>' +
-      '<div class="card"><h3>Save a backup</h3><p class="small">Creates a file with all your castles. Keep it somewhere safe, like your Files app or email it to yourself.</p><button class="btn primary" data-act="export">Save a backup file</button></div>' +
-      '<div class="card"><h3>Restore from a backup</h3><p class="small">Choose a backup file you saved earlier. Castles in the file are added; if one is already here, the backup version replaces it.</p>' +
-      '<input type="file" id="file" accept="application/json,.json" class="hide"><button class="btn" data-act="pickFile">Choose a backup file</button></div>';
+  /* ---------- backup and restore ---------- */
+  var DAY = 86400000;
+  function backupState() {
+    var last = S.prefs.lastBackup || 0, changed = S.prefs.changedAt || 0, now = Date.now();
+    if (!S.castles.length) return null;
+    if (S.prefs.remindAfter && now < S.prefs.remindAfter) return null;
+    if (!last) return 'You have not saved a backup yet. If this phone is lost or cleared, your castles go with it.';
+    if (changed > last) return 'You have made changes since your last backup.';
+    if (now - last >= 14 * DAY) return 'It has been ' + Math.floor((now - last) / DAY) + ' days since your last backup.';
+    return null;
   }
+  function backupReminder() {
+    var why = backupState(); if (!why) return '';
+    return '<div class="card gold"><h3>Time for a backup?</h3><p class="small">' + esc(why) + ' It takes a few seconds.</p>' +
+      '<button class="btn small warm" data-act="goBackup">Back up now</button><button class="btn small" data-act="remindLater">Remind me tomorrow</button></div>';
+  }
+  function whenText(ts) { return new Date(ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }); }
+  function vBackup() {
+    var last = S.prefs.lastBackup, h = '<h2>Back up or restore</h2><p class="soft">Your castles live only on this phone. A backup file keeps a safe copy, or lets you move to a new phone.</p>' +
+      '<div class="card"><h3>Save a backup</h3><p class="small">Creates one file with all your castles, your progress and your notes. On an iPhone, choose <b>Save to Files</b> when the share sheet opens.</p>' +
+      '<p class="small soft">' + (last ? 'Last backup: ' + esc(whenText(last)) + '.' : 'No backup saved yet.') + '</p>' +
+      '<button class="btn primary" data-act="export">Save a backup</button>' +
+      (ui.backupLink ? '<a class="btn" id="dl" href="' + ui.backupLink.url + '" download="' + esc(ui.backupLink.name) + '">Download did not start? Tap here</a>' : '') + '</div>' +
+      '<div class="card"><h3>Restore from backup</h3><p class="small">Choose a backup file you saved earlier. I will check it first, then ask whether to <b>merge</b> it in or <b>replace</b> what is on this phone.</p>' +
+      '<input type="file" id="file" accept="application/json,.json" class="hide"><button class="btn" data-act="pickFile">Restore from backup</button></div>';
+    return h;
+  }
+  function backupFileName() { return 'memory-castle-backup-' + SR.today() + '.json'; }
+  function backupText(ts) {
+    var d = JSON.parse(JSON.stringify(S)); d.prefs = d.prefs || {}; d.prefs.lastBackup = ts;
+    return JSON.stringify({ app: 'memory-castle', version: 2, appVersion: VERSION, exportedAt: new Date(ts).toISOString(), data: d, notes: NT }, null, 2);
+  }
+  function backupDone(ts) { S.prefs.lastBackup = ts; delete S.prefs.remindAfter; saveQuiet(); if (route().name === 'backup' || route().name === 'home') keepRender(); }
   function exportData() {
-    var blob = new Blob([JSON.stringify({ app: 'memory-castle', version: 1, exportedAt: new Date().toISOString(), data: S }, null, 2)], { type: 'application/json' });
-    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'memory-castle-backup-' + SR.today() + '.json';
-    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-    toast('Backup saved to your downloads.');
+    if (!S.castles.length) { toast('You have no castles to back up yet.'); return; }
+    var ts = Date.now(), text = backupText(ts), name = backupFileName(), f = null;
+    try { f = new File([text], name, { type: 'application/json' }); } catch (e) {}
+    if (f && navigator.canShare && navigator.share && navigator.canShare({ files: [f] })) {
+      navigator.share({ files: [f], title: 'Memory Castle backup' }).then(function () { backupDone(ts); toast('Backup saved. Keep that file somewhere safe.'); })
+        .catch(function (e) { if (e && e.name === 'AbortError') return; downloadBackup(text, name, ts); });
+      return;
+    }
+    downloadBackup(text, name, ts);
+  }
+  function downloadBackup(text, name, ts) {
+    var url = URL.createObjectURL(new Blob([text], { type: 'application/json' })), a = document.createElement('a');
+    ui.backupLink = { url: url, name: name };
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 500);
+    backupDone(ts); toast('Backup saved to your downloads.');
+  }
+
+  /* Check a chosen file and tidy each castle so odd or damaged data cannot break the app. Returns null if it is not a usable backup. */
+  function cleanBackup(text) {
+    var d; try { d = JSON.parse(text); } catch (e) { return null; }
+    var data = d && d.app === 'memory-castle' && d.data && typeof d.data === 'object' ? d.data : null;
+    if (!data || !Array.isArray(data.castles)) return null;
+    var str = function (v) { return typeof v === 'string' ? v : ''; }, ids = {}, castles = [];
+    data.castles.forEach(function (ic) {
+      if (!ic || typeof ic !== 'object' || !Array.isArray(ic.chunks)) return;
+      var c = JSON.parse(JSON.stringify(ic)); c.id = str(c.id) && !ids[c.id] ? c.id : uid(); ids[c.id] = 1;
+      c.title = str(c.title) || 'My castle'; c.route = str(c.route); c.built = !!c.built;
+      c.chunks = c.chunks.filter(function (k) { return k && typeof k === 'object'; }).map(function (k) {
+        k.id = str(k.id) || uid(); k.text = str(k.text); k.stop = str(k.stop); k.image = str(k.image);
+        if (!k.sr || typeof k.sr !== 'object' || (k.sr.due != null && typeof k.sr.due !== 'string')) k.sr = SR.newSr(); return k;
+      });
+      if (c.chunks.length) castles.push(c);
+    });
+    if (!castles.length) return null;
+    return { castles: castles, prefs: data.prefs && typeof data.prefs === 'object' ? data.prefs : {}, notes: d.notes && typeof d.notes === 'object' ? Notes.sane(d.notes) : null,
+      when: d.exportedAt && !isNaN(new Date(d.exportedAt)) ? new Date(d.exportedAt).getTime() : 0, pieces: castles.reduce(function (a, c) { return a + c.chunks.length; }, 0) };
   }
   function importData(text) {
-    var d;
-    try { d = JSON.parse(text); } catch (e) { toast('That file does not look like a Memory Castle backup.'); return; }
-    var data = d && d.app === 'memory-castle' && d.data ? d.data : null;
-    if (!data || !Array.isArray(data.castles)) { toast('That file does not look like a Memory Castle backup.'); return; }
-    var added = 0;
-    data.castles.forEach(function (ic) {
-      if (!ic || !ic.id || !Array.isArray(ic.chunks)) return;
-      ic.title = ic.title || 'My castle'; ic.route = ic.route || '';
-      ic.chunks.forEach(function (k) { k.id = k.id || uid(); k.sr = k.sr || SR.newSr(); k.text = k.text || ''; k.stop = k.stop || ''; k.image = k.image || ''; });
-      var ex = castle(ic.id); if (ex) S.castles[S.castles.indexOf(ex)] = ic; else S.castles.push(ic); added++;
-    });
-    save(); toast('Restored ' + plural(added, 'castle', 'castles') + '.'); go('#/home'); render();
+    var b = cleanBackup(text);
+    if (!b) { toast('That file does not look like a Memory Castle backup.'); return; }
+    var here = S.castles.length, same = b.castles.filter(function (c) { return !!castle(c.id); }).length;
+    var m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div role="dialog" aria-modal="true"><h3>Restore this backup?</h3><p class="soft">' + (b.when ? 'Saved ' + esc(whenText(b.when)) + '. ' : '') + 'It has ' + plural(b.castles.length, 'castle', 'castles') + ' and ' + plural(b.pieces, 'piece', 'pieces') + '. This phone has ' + plural(here, 'castle', 'castles') + '.</p>' +
+      '<button class="btn primary" id="rm">Merge: keep what is here and add the rest</button><p class="small soft" style="margin-top:-4px">Castles already on this phone stay exactly as they are' + (same ? ' (' + same + ' of these ' + (same === 1 ? 'is' : 'are') + ' already here)' : '') + '.</p>' +
+      '<button class="btn danger" id="rr">Replace everything on this phone</button><p class="small soft" style="margin-top:-4px">Your current castles, progress and notes are swapped for the backup.</p>' +
+      '<button class="btn" id="rc">Cancel</button></div>';
+    document.body.appendChild(m);
+    m.querySelector('#rc').onclick = function () { m.remove(); };
+    m.querySelector('#rm').onclick = function () { m.remove(); restore(b, 'merge'); };
+    m.querySelector('#rr').onclick = function () { m.remove(); restore(b, 'replace'); };
+  }
+  function restore(b, how) {
+    try { localStorage.setItem('memoryCastle.beforeRestore', JSON.stringify({ at: Date.now(), data: S, notes: NT })); } catch (e) {}
+    var msg;
+    if (how === 'replace') {
+      S = { castles: b.castles, prefs: b.prefs }; if (b.notes) NT = b.notes;
+      msg = 'Restored ' + plural(b.castles.length, 'castle', 'castles') + '.';
+    } else {
+      var added = 0; b.castles.forEach(function (c) { if (!castle(c.id)) { S.castles.push(c); added++; } });
+      msg = added ? 'Added ' + plural(added, 'castle', 'castles') + '. The others were already here.' : 'Nothing new to add. Those castles were already here.';
+    }
+    var now = Date.now(); S.prefs.changedAt = now; if (how === 'replace') S.prefs.lastBackup = now;
+    save(true); saveNotes(); logEvent('Restored a backup', how); toast(msg); go('#/home'); render();
   }
 
   /* ---------- actions ---------- */
@@ -469,7 +547,7 @@
     goNew: function () { go('#/new'); }, goPaste: function () { go('#/paste'); },
     goNextSession: function () { go(ui.session && ui.session.next ? ui.session.next : '#/home'); },
     introStart: function () { ui.practice = null; ui.nudge = false; ui.ideaSeed = 0; go('#/intro/practice/0'); },
-    introSkip: function () { S.prefs.introSkipped = true; save(); logEvent('Skipped the practice castle'); go('#/home'); render(); },
+    introSkip: function () { S.prefs.introSkipped = true; saveQuiet(); logEvent('Skipped the practice castle'); go('#/home'); render(); },
     introGo: function (el) { ui.nudge = false; go('#/intro/practice/' + el.dataset.n); },
     introTest: function () {
       var c = practiceCastle();
@@ -510,7 +588,7 @@
       var c = castle(route().id), n = parseInt(el.dataset.n, 10);
       confirmBox('Remove stop ' + n + '?', 'Its name, text and image will be removed.', 'Yes, remove it', function () { c.chunks.splice(n - 1, 1); save(); go('#/piece/' + c.id + '/' + Math.max(1, Math.min(n, c.chunks.length))); });
     },
-    pbpIdeas: function () { ui.pbpIdeas = !ui.pbpIdeas; keepRender(); }, goNotes: function () { go('#/notes'); },
+    goNotes: function () { go('#/notes'); },
     confused: confusedBox, shareNotes: shareNotes,
     copyNotes: function () {
       var t = Notes.asText(notesExport());
@@ -519,7 +597,7 @@
     },
     clearNotes: function () { confirmBox('Clear all notes?', 'This removes your notes and the screen trail from this phone.', 'Yes, clear them', function () { NT = Notes.empty(); saveNotes(); keepRender(); }); }, goBackup: function () { go('#/backup'); }, goHome: function () { go('#/home'); },
     goBackSession: function () { go(ui.session ? ui.session.back : '#/home'); },
-    hideInstall: function () { S.prefs.hideInstall = true; save(); render(); },
+    hideInstall: function () { S.prefs.hideInstall = true; saveQuiet(); render(); },
     mode: function (el) { ui.mode = el.dataset.v; keepRender(); },
     level: function (el) { ui.level = parseInt(el.dataset.v, 10); keepRender(); },
     split: function () {
@@ -600,11 +678,13 @@
       ui.moved = k.id; save(); logEvent('Moved a long stop name into the image'); keepRender();
     },
     nudge: function () { ui.nudge = !ui.nudge; keepRender(); },
-    moreIdeas: function () { ui.ideaSeed++; logEvent('Asked for different image ideas'); keepRender(); },
+    giveIdea: function (el) { ui.idea = { id: el.dataset.cid, n: 0 }; logEvent('Asked for an image idea'); keepRender(); },
+    diffIdea: function (el) { ui.idea = { id: el.dataset.cid, n: (ui.idea && ui.idea.id === el.dataset.cid ? ui.idea.n : 0) + 1 }; logEvent('Asked for a different image idea'); keepRender(); },
     useIdea: function (el) {
       var c = castle(route().id), ta = document.getElementById('img'), k = ta && chunk(c, ta.dataset.cid); if (!k) return;
       var t = el.dataset.text; ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + t : t; autosize(ta);
-      k.image = ta.value; save(); logEvent('Used an image idea', 'idea ' + (parseInt(el.dataset.n, 10) + 1));
+      k.image = ta.value; save(); logEvent('Used an image idea'); ui.idea = { closed: k.id };
+      keepRender(); ta = document.getElementById('img');
       try { ta.scrollIntoView({ block: 'center' }); } catch (e) {} ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); toast('Added. Now make it your own: change anything you like.');
     },
     imgPrev: function (el) { go('#/images/' + route().id + '/' + (parseInt(el.dataset.i, 10) - 1)); },
@@ -638,11 +718,11 @@
     show: function () { ui.session.shown = true; keepRender(); },
     rate: function (el) {
       var s = ui.session, it = s.items[s.i], c = castle(it.cid), k = chunk(c, it.kid), r = el.dataset.v;
-      if (!s.practiceOnly) { k.sr = SR.apply(k.sr, r, SR.today()); delete k.orig; } s.tally[r]++; save();
+      if (!s.practiceOnly) { k.sr = SR.apply(k.sr, r, SR.today()); delete k.orig; } s.tally[r]++; saveQuiet();
       s.i++; s.shown = false; if (s.i >= s.items.length) s.done = true; render();
     },
     /* backup */
-    export: exportData,
+    export: exportData, remindLater: function () { S.prefs.remindAfter = Date.now() + DAY; saveQuiet(); render(); },
     pickFile: function () { document.getElementById('file').click(); }
   };
 
@@ -700,7 +780,7 @@
     }
   });
   document.addEventListener('change', function (e) {
-    if (e.target.id === 'file' && e.target.files[0]) { var rd = new FileReader(); rd.onload = function () { importData(rd.result); }; rd.readAsText(e.target.files[0]); }
+    if (e.target.id === 'file' && e.target.files[0]) { var rd = new FileReader(); rd.onload = function () { importData(rd.result); }; rd.readAsText(e.target.files[0]); e.target.value = ''; }
   });
 
   /* ---------- start ---------- */

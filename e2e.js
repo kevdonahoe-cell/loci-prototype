@@ -37,8 +37,8 @@ const SH = '/workspace/memory-castle-shots/';
   assert.equal((await st()).castles.length, 0, 'practice items are not saved or scheduled');
   await p.click('text=Carry on');
   await p.waitForSelector('text=Now try making one yourself');
-  assert.equal(await p.inputValue('#img'), ''); assert.equal(await p.locator('.idea').count(), 3);
-  await p.click('.idea >> nth=0'); await p.fill('#img', (await p.inputValue('#img')) + ' It fizzes and sparks when I touch it.');
+  assert.equal(await p.inputValue('#img'), ''); assert.equal(await p.locator('#ideatext').count(), 0, 'practice: no idea until asked');
+  await p.click('text=Give me an idea'); await p.click('text=Use this idea'); await p.fill('#img', (await p.inputValue('#img')) + ' It fizzes and sparks when I touch it.');
   await p.click('text=Need a nudge?'); await p.waitForFunction(() => !document.querySelector('#toast.show')); await p.evaluate(() => scrollTo(0, 0)); await p.screenshot({ path: SH + '16-intro-try-yourself.png' });
   await p.click('.sticky >> text=Next');
   await p.waitForSelector('text=You\u2019re ready'); assert.ok((await p.textContent('.image')).includes('fizzes'));
@@ -68,7 +68,7 @@ const SH = '/workspace/memory-castle-shots/';
   const pbp = [['Front gate', 'Welcome and thank the choir', 'The choir is singing on top of my front gate, swaying so hard it creaks.'], ['Bus stop', 'Story about the lost umbrella', ''], ['Park bench', 'Close with the invitation to lunch', 'A huge picnic is laid out on the park bench and it smells of sausages.']];
   for (let i = 0; i < 3; i++) {
     await p.fill('#pstop', pbp[i][0]); await p.fill('#ptext', pbp[i][1]);
-    if (i === 1) { await p.click('text=Show image ideas'); assert.equal(await p.locator('.idea').count(), 3); const it = await p.locator('.idea >> nth=2').textContent(); assert.ok(/bus stop/i.test(it), it); await p.click('.idea >> nth=2'); await p.screenshot({ path: SH + '20-pbp-stop-ideas.png' }); }
+    if (i === 1) { if (await p.locator('text=Give me an idea').count()) await p.click('text=Give me an idea'); const it = await p.locator('#ideatext').textContent(); assert.ok(/bus stop/i.test(it), it); await p.click('text=Use this idea'); assert.equal(await p.inputValue('#img'), it); await p.screenshot({ path: SH + '20-pbp-stop-ideas.png' }); }
     else await p.fill('#img', pbp[i][2]);
     if (i < 2) { await p.click('text=+ Add next stop'); await p.waitForSelector('text=stop ' + (i + 2) + ' of ' + (i + 2)); }
   }
@@ -177,17 +177,17 @@ const SH = '/workspace/memory-castle-shots/';
   await p.evaluate(() => scrollTo(0, 0)); await p.screenshot({ path: SH + '03-route-stops.png' });
   await p.click('text=Next: make your images'); 
   await p.waitForSelector('text=Picture it at this stop');
-  // image ideas: three ideas in words, tap one to start from, edit it
-  assert.equal(await p.locator('.idea').count(), 3, 'three image ideas');
-  const ideaTexts = await p.locator('.idea').allTextContents(); assert.equal(new Set(ideaTexts).size, 3); console.log('ideas for stop 1:', ideaTexts);
-  assert.ok(ideaTexts.every(t => /front gate/i.test(t)), 'ideas mention the stop');
+  // image ideas (v0.4): box starts empty, one idea on request, Different idea swaps it, Use this idea copies it in
+  assert.equal(await p.locator('.idea').count(), 0, 'no idea list');
+  assert.equal(await p.locator('#ideatext').count(), 0, 'not the first castle: no pre-shown idea');
   assert.equal(await p.inputValue('#img'), '', 'box starts empty: nothing auto-generated');
+  await p.click('text=Give me an idea'); const idea1 = await p.textContent('#ideatext'); assert.ok(/front gate/i.test(idea1), idea1);
   await p.screenshot({ path: SH + '04-make-image.png' });
-  await p.click('.idea >> nth=1');
-  assert.equal(await p.inputValue('#img'), ideaTexts[1], 'tap fills the box');
-  assert.equal((await st()).castles[1].chunks[0].image, ideaTexts[1], 'saved');
-  await p.fill('#img', ideaTexts[1] + ' (and it is wearing my dad\u2019s hat)');
-  await p.click('text=Show different ideas'); assert.notDeepEqual(await p.locator('.idea').allTextContents(), ideaTexts);
+  await p.click('text=Different idea'); const idea2 = await p.textContent('#ideatext'); assert.notEqual(idea2, idea1);
+  await p.click('text=Use this idea');
+  assert.equal(await p.inputValue('#img'), idea2, 'use copies it into the box');
+  assert.equal((await st()).castles[1].chunks[0].image, idea2, 'saved');
+  await p.fill('#img', idea2 + ' (and it is wearing my dad\u2019s hat)');
   await p.click('text=Need a nudge?');
   await p.screenshot({ path: SH + '04b-make-image-nudges.png' });
   // confused button, with text
@@ -281,13 +281,14 @@ const SH = '/workspace/memory-castle-shots/';
   // castle backup must not contain notes
   // backup export / import
   await p.goto('http://localhost:8765/#/backup');
-  const [dl] = await Promise.all([p.waitForEvent('download'), p.click('text=Save a backup file')]);
+  const [dl] = await Promise.all([p.waitForEvent('download'), p.click('button:has-text("Save a backup")')]);
   await dl.saveAs('/workspace/pw/backup.json');
   const bk = JSON.parse(require('fs').readFileSync('/workspace/pw/backup.json', 'utf8')); assert.equal(bk.app, 'memory-castle'); assert.equal(bk.data.castles.length, 2);
   await p.evaluate(() => localStorage.clear()); await p.reload();
   assert.equal((await st())?.castles?.length ?? 0, 0);
   await p.goto('http://localhost:8765/#/backup');
   await p.setInputFiles('#file', '/workspace/pw/backup.json');
+  await p.waitForSelector('text=Restore this backup?'); await p.click('#rr');
   await p.waitForSelector('text=Your castles');
   assert.equal((await st()).castles.length, 2); console.log('import restored 2 castles');
   // bad file
